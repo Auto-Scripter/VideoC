@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
+// CHANGE: The Toast component is imported. It's assumed to be a default export.
 import Toast from '../components/Toast';
 
 // <-- IMPORT YOUR ASSETS HERE -->
@@ -49,11 +50,17 @@ const AuthForm = () => {
   const [loading, setLoading] = useState(false);
   const [isSuccess, setIsSuccess] = useState(false);
   const [isResetModalOpen, setIsResetModalOpen] = useState(false);
-  const [toast, setToast] = useState({ message: '', type: 'error' });
+  // CHANGE: State now holds a single toast object or null.
+  const [activeToast, setActiveToast] = useState(null);
+
+  const showToast = (toastData) => {
+    setActiveToast({ id: Date.now(), ...toastData });
+  };
 
   const handleAuthSuccess = (message) => {
     setIsSuccess(true);
-    setToast({ message, type: 'success' });
+    // CHANGE: Use the new toast format.
+    showToast({ title: 'Success', message, type: 'success', duration: 2000 });
     setTimeout(() => {
       navigate('/dashboard');
     }, 2000);
@@ -61,17 +68,19 @@ const AuthForm = () => {
   
   const handleAuthError = (err) => {
       const errorMap = {
-          'auth/invalid-credential': 'Invalid email or password. Please try again.',
-          'auth/email-already-in-use': 'An account with this email already exists.',
-          'auth/weak-password': 'The password is too weak. Please choose a stronger one.',
-          'auth/user-not-found': 'No account found with this email.',
+        'auth/invalid-credential': 'Invalid email or password. Please try again.',
+        'auth/email-already-in-use': 'An account with this email already exists.',
+        'auth/weak-password': 'The password is too weak. Please choose a stronger one.',
+        'auth/user-not-found': 'No account found with this email.',
+        'auth/invalid-email': 'Please enter a valid email address.'
       };
-      setToast({ message: errorMap[err.code] || err.message, type: 'error' });
+      // CHANGE: Use the new toast format.
+      showToast({ title: 'Authentication Error', message: errorMap[err.code] || err.message, type: 'error' });
   };
   
   const handleSubmit = async (e) => {
     e.preventDefault();
-    setToast({ message: '', type: 'error' });
+    setActiveToast(null);
     setLoading(true);
 
     if (isLogin) {
@@ -96,16 +105,17 @@ const AuthForm = () => {
       const nameRegex = /^[A-Za-z]+$/;
       if (!nameRegex.test(firstName) || !nameRegex.test(lastName)) {
         setLoading(false);
-        return setToast({ message: 'Names should only contain letters.', type: 'error' });
+        // CHANGE: Show validation warning toast
+        return showToast({ title: 'Invalid Name', message: 'Names should only contain letters.', type: 'warning' });
       }
       if (password.length < 6) {
         setLoading(false);
-        return setToast({ message: 'Password must be at least 6 characters.', type: 'error' });
+        return showToast({ title: 'Weak Password', message: 'Password must be at least 6 characters.', type: 'warning' });
       }
       const specialCharRegex = /[!@#$%^&*(),.?":{}|<>]/;
       if (!specialCharRegex.test(password)) {
         setLoading(false);
-        return setToast({ message: 'Password must include a special character.', type: 'error' });
+        return showToast({ title: 'Weak Password', message: 'Password must include a special character.', type: 'warning' });
       }
 
       try {
@@ -126,7 +136,7 @@ const AuthForm = () => {
   };
 
   const handleGoogleAuth = async () => {
-    setToast({ message: '', type: 'error' });
+    setActiveToast(null);
     setLoading(true);
     const provider = new GoogleAuthProvider();
     try {
@@ -162,12 +172,12 @@ const AuthForm = () => {
   const handlePasswordReset = async (e) => {
     e.preventDefault();
     if (!resetEmail) {
-        return setToast({ message: 'Please enter your email address.', type: 'error' });
+        return showToast({ title: 'Input Required', message: 'Please enter your email address.', type: 'warning' });
     }
     setLoading(true);
     try {
         await sendPasswordResetEmail(auth, resetEmail);
-        setToast({ message: 'Password reset link sent! Check your inbox.', type: 'success' });
+        showToast({ title: 'Check Your Email', message: 'Password reset link sent to your inbox.', type: 'success' });
         setIsResetModalOpen(false);
         setResetEmail('');
     } catch (err) {
@@ -178,7 +188,7 @@ const AuthForm = () => {
 
   const toggleAuthMode = () => {
     setIsLogin(!isLogin);
-    setToast({ message: '', type: 'error' });
+    setActiveToast(null);
     setFirstName('');
     setLastName('');
     setEmail('');
@@ -202,13 +212,25 @@ const AuthForm = () => {
         className="min-h-screen bg-cover bg-center"
         style={{ backgroundImage: `url(${backgroundImage})` }}
       >
+        {/* --- CHANGE: Toast Container --- */}
+        {/* This div positions the toast notifications in the top-right corner. */}
+        <div className="fixed top-5 right-5 z-50 w-full max-w-sm">
+            <AnimatePresence>
+                {activeToast && (
+                    <Toast
+                        key={activeToast.id}
+                        toast={activeToast}
+                        onClose={() => setActiveToast(null)}
+                    />
+                )}
+            </AnimatePresence>
+        </div>
+
         <div className="min-h-screen bg-black/20 flex flex-col justify-center items-center p-4">
-            <Toast message={toast.message} type={toast.type} onClose={() => setToast({ message: '', type: 'error' })} />
-            
             <AnimatePresence>
                 {isResetModalOpen && (
                     <motion.div
-                        className="fixed inset-0 bg-black/50 z-50 flex justify-center items-center"
+                        className="fixed inset-0 bg-black/50 z-40 flex justify-center items-center" // z-index lower than toast
                         initial={{ opacity: 0 }}
                         animate={{ opacity: 1 }}
                         exit={{ opacity: 0 }}
@@ -247,7 +269,7 @@ const AuthForm = () => {
             
             {isSuccess && (
                 <motion.div 
-                className="absolute inset-0 bg-slate-900/90 flex justify-center items-center z-40"
+                className="absolute inset-0 bg-slate-900/90 flex justify-center items-center z-30"
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 1 }}
                 transition={{ duration: 0.5 }}
@@ -264,8 +286,6 @@ const AuthForm = () => {
                         alt="Your Company Logo" 
                         className="h-9 w-auto"
                     />
-                    {/* CHANGE: Wrapped changing text in AnimatePresence for a smooth cross-fade animation. */}
-                    {/* The parent div has a fixed height (h-20) to prevent the layout from shifting during the animation. */}
                     <div className="relative h-20 mt-4">
                         <AnimatePresence initial={false}>
                             <motion.div
@@ -283,23 +303,20 @@ const AuthForm = () => {
                     </div>
                 </div>
 
-                {/* CHANGE: Converted form to motion.form and added the `layout` prop. */}
-                {/* This will automatically animate the form's height when its content changes. */}
                 <motion.form 
                     layout
                     transition={{ duration: 0.4, type: "spring", bounce: 0.15 }}
                     onSubmit={handleSubmit} 
                     className="space-y-5"
                 >
-                    {/* CHANGE: Wrapped conditional inputs in AnimatePresence for smooth entry/exit. */}
                     <AnimatePresence initial={false}>
                         {!isLogin && (
                         <motion.div
-                            key="nameFields" // A unique key is crucial for AnimatePresence
+                            key="nameFields"
                             initial={{ opacity: 0, height: 0 }}
                             animate={{ opacity: 1, height: 'auto', transition: { duration: 0.3 } }}
                             exit={{ opacity: 0, height: 0, transition: { duration: 0.2 } }}
-                            className="overflow-hidden" // Hide content as height collapses
+                            className="overflow-hidden"
                         >
                             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                                 <input type="text" value={firstName} onChange={(e) => setFirstName(e.target.value)} required={!isLogin} className="w-full bg-transparent border-b-2 border-slate-600 focus:border-blue-500 text-white placeholder-slate-500 py-2 outline-none transition-colors duration-300" placeholder="First Name" />
