@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
+import { Eye, EyeOff } from 'lucide-react';
 import Toast from '../components/Toast';
 
 // <-- IMPORT YOUR ASSETS HERE -->
@@ -46,39 +47,59 @@ const AuthForm = () => {
   const [email, setEmail] = useState('');
   const [resetEmail, setResetEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [isSuccess, setIsSuccess] = useState(false);
   const [isResetModalOpen, setIsResetModalOpen] = useState(false);
-  const [toast, setToast] = useState({ message: '', type: 'error' });
+  const [activeToast, setActiveToast] = useState(null);
 
-  const handleAuthSuccess = (message) => {
+  const showToast = (toastData) => {
+    setActiveToast({ id: Date.now(), ...toastData });
+  };
+
+  const handleAuthSuccess = (message, redirectPath) => {
     setIsSuccess(true);
-    setToast({ message, type: 'success' });
+    showToast({ title: 'Success', message, type: 'success', duration: 2000 });
     setTimeout(() => {
-      navigate('/dashboard');
+      navigate(redirectPath);
     }, 2000);
   };
   
   const handleAuthError = (err) => {
       const errorMap = {
-          'auth/invalid-credential': 'Invalid email or password. Please try again.',
-          'auth/email-already-in-use': 'An account with this email already exists.',
-          'auth/weak-password': 'The password is too weak. Please choose a stronger one.',
-          'auth/user-not-found': 'No account found with this email.',
+        'auth/invalid-credential': 'Invalid email or password. Please try again.',
+        'auth/email-already-in-use': 'An account with this email already exists.',
+        'auth/weak-password': 'The password is too weak. Please choose a stronger one.',
+        'auth/user-not-found': 'No account found with this email.',
+        'auth/invalid-email': 'Please enter a valid email address.'
       };
-      setToast({ message: errorMap[err.code] || err.message, type: 'error' });
+      showToast({ title: 'Authentication Error', message: errorMap[err.code] || err.message, type: 'error' });
+  };
+
+  const isAdminUser = async (userEmail) => {
+      try {
+          const rolesDocRef = doc(db, "config", "roles");
+          const docSnap = await getDoc(rolesDocRef);
+          if (docSnap.exists() && docSnap.data().adminEmail === userEmail) {
+              return true;
+          }
+      } catch (error) {
+          console.error("Error checking admin status:", error);
+      }
+      return false;
   };
   
   const handleSubmit = async (e) => {
     e.preventDefault();
-    setToast({ message: '', type: 'error' });
+    setActiveToast(null);
     setLoading(true);
 
     if (isLogin) {
       try {
         const userCredential = await signInWithEmailAndPassword(auth, email, password);
-        const token = await userCredential.user.getIdToken();
-        const userDocRef = doc(db, "users", userCredential.user.uid);
+        const user = userCredential.user;
+        const token = await user.getIdToken();
+        const userDocRef = doc(db, "users", user.uid);
         const docSnap = await getDoc(userDocRef);
         
         if (docSnap.exists()) {
@@ -88,7 +109,13 @@ const AuthForm = () => {
             localStorage.setItem('userName', userName);
         }
         
-        handleAuthSuccess('Login Successful! Redirecting...');
+        const isAdmin = await isAdminUser(user.email);
+        if (isAdmin) {
+            handleAuthSuccess('Admin Login Successful! Redirecting...', '/dashboard');
+        } else {
+            handleAuthSuccess('Login Successful! Redirecting...', '/home');
+        }
+
       } catch (err) {
         handleAuthError(err);
       }
@@ -96,28 +123,28 @@ const AuthForm = () => {
       const nameRegex = /^[A-Za-z]+$/;
       if (!nameRegex.test(firstName) || !nameRegex.test(lastName)) {
         setLoading(false);
-        return setToast({ message: 'Names should only contain letters.', type: 'error' });
+        return showToast({ title: 'Invalid Name', message: 'Names should only contain letters.', type: 'warning' });
       }
       if (password.length < 6) {
         setLoading(false);
-        return setToast({ message: 'Password must be at least 6 characters.', type: 'error' });
+        return showToast({ title: 'Weak Password', message: 'Password must be at least 6 characters.', type: 'warning' });
       }
       const specialCharRegex = /[!@#$%^&*(),.?":{}|<>]/;
       if (!specialCharRegex.test(password)) {
         setLoading(false);
-        return setToast({ message: 'Password must include a special character.', type: 'error' });
+        return showToast({ title: 'Weak Password', message: 'Password must include a special character.', type: 'warning' });
       }
 
       try {
         const userCredential = await createUserWithEmailAndPassword(auth, email, password);
-        await setDoc(doc(db, "users", userCredential.user.uid), { uid: userCredential.user.uid, firstName: firstName, lastName: lastName, email: userCredential.user.email, createdAt: new Date(), authProvider: "email" });
+        await setDoc(doc(db, "users", userCredential.user.uid), { uid: userCredential.user.uid, firstName, lastName, email: userCredential.user.email, createdAt: new Date(), authProvider: "email" });
         
         const token = await userCredential.user.getIdToken();
         const userName = `${firstName} ${lastName}`;
         localStorage.setItem('authToken', token);
         localStorage.setItem('userName', userName);
 
-        handleAuthSuccess('Account Created! Redirecting...');
+        handleAuthSuccess('Account Created! Redirecting...', '/home');
       } catch (err) {
         handleAuthError(err);
       }
@@ -126,32 +153,39 @@ const AuthForm = () => {
   };
 
   const handleGoogleAuth = async () => {
-    setToast({ message: '', type: 'error' });
+    setActiveToast(null);
     setLoading(true);
     const provider = new GoogleAuthProvider();
     try {
       const result = await signInWithPopup(auth, provider);
-      const userDocRef = doc(db, "users", result.user.uid);
+      const user = result.user;
+      const userDocRef = doc(db, "users", user.uid);
       const docSnap = await getDoc(userDocRef);
       
       let fName, lName;
       if (!docSnap.exists()) {
-        const nameParts = result.user.displayName ? result.user.displayName.split(' ') : [];
+        const nameParts = user.displayName ? user.displayName.split(' ') : [];
         fName = nameParts[0] || '';
         lName = nameParts.slice(1).join(' ') || '';
-        await setDoc(userDocRef, { uid: result.user.uid, firstName: fName, lastName: lName, email: result.user.email, createdAt: new Date(), authProvider: "google" });
+        await setDoc(userDocRef, { uid: user.uid, firstName: fName, lastName: lName, email: user.email, createdAt: new Date(), authProvider: "google" });
       } else {
           const userData = docSnap.data();
           fName = userData.firstName;
           lName = userData.lastName;
       }
 
-      const token = await result.user.getIdToken();
+      const token = await user.getIdToken();
       const userName = `${fName} ${lName}`;
       localStorage.setItem('authToken', token);
       localStorage.setItem('userName', userName);
 
-      handleAuthSuccess('Login Successful! Redirecting...');
+      const isAdmin = await isAdminUser(user.email);
+      if (isAdmin) {
+          handleAuthSuccess('Admin Login Successful! Redirecting...', '/dashboard');
+      } else {
+          handleAuthSuccess('Login Successful! Redirecting...', '/home');
+      }
+
     } catch (err) {
       handleAuthError(err);
     } finally {
@@ -162,12 +196,12 @@ const AuthForm = () => {
   const handlePasswordReset = async (e) => {
     e.preventDefault();
     if (!resetEmail) {
-        return setToast({ message: 'Please enter your email address.', type: 'error' });
+        return showToast({ title: 'Input Required', message: 'Please enter your email address.', type: 'warning' });
     }
     setLoading(true);
     try {
         await sendPasswordResetEmail(auth, resetEmail);
-        setToast({ message: 'Password reset link sent! Check your inbox.', type: 'success' });
+        showToast({ title: 'Check Your Email', message: 'Password reset link sent to your inbox.', type: 'success' });
         setIsResetModalOpen(false);
         setResetEmail('');
     } catch (err) {
@@ -178,7 +212,7 @@ const AuthForm = () => {
 
   const toggleAuthMode = () => {
     setIsLogin(!isLogin);
-    setToast({ message: '', type: 'error' });
+    setActiveToast(null);
     setFirstName('');
     setLastName('');
     setEmail('');
@@ -202,13 +236,23 @@ const AuthForm = () => {
         className="min-h-screen bg-cover bg-center"
         style={{ backgroundImage: `url(${backgroundImage})` }}
       >
+        <div className="fixed top-5 right-5 z-50 w-full max-w-sm">
+            <AnimatePresence>
+                {activeToast && (
+                    <Toast
+                        key={activeToast.id}
+                        toast={activeToast}
+                        onClose={() => setActiveToast(null)}
+                    />
+                )}
+            </AnimatePresence>
+        </div>
+
         <div className="min-h-screen bg-black/20 flex flex-col justify-center items-center p-4">
-            <Toast message={toast.message} type={toast.type} onClose={() => setToast({ message: '', type: 'error' })} />
-            
             <AnimatePresence>
                 {isResetModalOpen && (
                     <motion.div
-                        className="fixed inset-0 bg-black/50 z-50 flex justify-center items-center"
+                        className="fixed inset-0 bg-black/50 z-40 flex justify-center items-center"
                         initial={{ opacity: 0 }}
                         animate={{ opacity: 1 }}
                         exit={{ opacity: 0 }}
@@ -247,7 +291,7 @@ const AuthForm = () => {
             
             {isSuccess && (
                 <motion.div 
-                className="absolute inset-0 bg-slate-900/90 flex justify-center items-center z-40"
+                className="absolute inset-0 bg-slate-900/90 flex justify-center items-center z-30"
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 1 }}
                 transition={{ duration: 0.5 }}
@@ -256,7 +300,6 @@ const AuthForm = () => {
                 </motion.div>
             )}
 
-            {/* --- Left Column: Authentication Form --- */}
             <div className="p-6 md:p-10 flex flex-col justify-center">
                 <div className="mb-6">
                     <img 
@@ -264,8 +307,6 @@ const AuthForm = () => {
                         alt="Your Company Logo" 
                         className="h-9 w-auto"
                     />
-                    {/* CHANGE: Wrapped changing text in AnimatePresence for a smooth cross-fade animation. */}
-                    {/* The parent div has a fixed height (h-20) to prevent the layout from shifting during the animation. */}
                     <div className="relative h-20 mt-4">
                         <AnimatePresence initial={false}>
                             <motion.div
@@ -283,23 +324,20 @@ const AuthForm = () => {
                     </div>
                 </div>
 
-                {/* CHANGE: Converted form to motion.form and added the `layout` prop. */}
-                {/* This will automatically animate the form's height when its content changes. */}
                 <motion.form 
                     layout
                     transition={{ duration: 0.4, type: "spring", bounce: 0.15 }}
                     onSubmit={handleSubmit} 
                     className="space-y-5"
                 >
-                    {/* CHANGE: Wrapped conditional inputs in AnimatePresence for smooth entry/exit. */}
                     <AnimatePresence initial={false}>
                         {!isLogin && (
                         <motion.div
-                            key="nameFields" // A unique key is crucial for AnimatePresence
+                            key="nameFields"
                             initial={{ opacity: 0, height: 0 }}
                             animate={{ opacity: 1, height: 'auto', transition: { duration: 0.3 } }}
                             exit={{ opacity: 0, height: 0, transition: { duration: 0.2 } }}
-                            className="overflow-hidden" // Hide content as height collapses
+                            className="overflow-hidden"
                         >
                             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                                 <input type="text" value={firstName} onChange={(e) => setFirstName(e.target.value)} required={!isLogin} className="w-full bg-transparent border-b-2 border-slate-600 focus:border-blue-500 text-white placeholder-slate-500 py-2 outline-none transition-colors duration-300" placeholder="First Name" />
@@ -315,10 +353,26 @@ const AuthForm = () => {
                     </div>
                     <div>
                         <div className="flex justify-between items-center">
-                        <label className="text-xs text-slate-400">Password</label>
-                        {isLogin && <button type="button" onClick={() => setIsResetModalOpen(true)} className="text-xs font-medium text-blue-500 hover:text-blue-400">Forgot Password?</button>}
+                            <label className="text-xs text-slate-400">Password</label>
+                            {isLogin && <button type="button" onClick={() => setIsResetModalOpen(true)} className="text-xs font-medium text-blue-500 hover:text-blue-400">Forgot Password?</button>}
                         </div>
-                        <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} required className="w-full bg-transparent border-b-2 border-slate-600 focus:border-blue-500 text-white placeholder-slate-500 py-2 outline-none transition-colors duration-300" placeholder="••••••••" />
+                        <div className="relative">
+                            <input 
+                                type={showPassword ? 'text' : 'password'} 
+                                value={password} 
+                                onChange={(e) => setPassword(e.target.value)} 
+                                required 
+                                className="w-full bg-transparent border-b-2 border-slate-600 focus:border-blue-500 text-white placeholder-slate-500 py-2 pr-10 outline-none transition-colors duration-300" 
+                                placeholder="••••••••" 
+                            />
+                            <button 
+                                type="button" 
+                                onClick={() => setShowPassword(!showPassword)} 
+                                className="absolute inset-y-0 right-0 flex items-center pr-3 text-slate-400 hover:text-slate-200"
+                            >
+                                {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+                            </button>
+                        </div>
                     </div>
                     <div>
                         <button type="submit" disabled={loading || isSuccess} className="w-full flex justify-center py-2.5 px-4 border border-transparent rounded-lg shadow-sm text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 ring-offset-slate-900 transition-all duration-300 transform hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed">
@@ -347,7 +401,6 @@ const AuthForm = () => {
                 </div>
             </div>
             
-            {/* --- Right Column: Image Banner --- */}
             <div className="hidden md:block">
                 <img 
                     src={authBannerImage} 
